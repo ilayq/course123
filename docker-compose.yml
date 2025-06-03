@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    hostname: rabbitmq
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_VHOST: /auction
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+      RABBITMQ_CONFIG_FILE: /etc/rabbitmq/rabbitmq.conf
+      RABBITMQ_LOAD_DEFINITIONS: /etc/rabbitmq/definitions.json
+    volumes:
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+    networks:
+      - auction_net
+
+  redis:
+    image: redis:alpine
+    hostname: redis
+    container_name: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - auction_net
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    hostname: api-gateway
+    container_name: api-gateway
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.py:/app/config.py:ro
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - auction_net
+    restart: unless-stopped
+
+  bidding-service:
+    build:
+      context: ./bidding-service
+      dockerfile: Dockerfile
+    hostname: bidding-service
+    container_name: bidding-service
+    volumes:
+      - ./config.py:/app/config.py:ro
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - auction_net
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    hostname: notification-service
+    container_name: notification-service
+    volumes:
+      - ./config.py:/app/config.py:ro
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - auction_net
+    restart: unless-stopped
+
+networks:
+  auction_net:
+    driver: bridge

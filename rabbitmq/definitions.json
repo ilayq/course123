@@ -1,0 +1,76 @@
+{
+  "users": [
+    {
+      "name": "admin",
+      "password": "admin123",
+      "tags": "administrator"
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/auction"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "admin",
+      "vhost": "/auction",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "parameters": [],
+  "global_parameters": [],
+  "policies": [],
+  "queues": [
+    {
+      "name": "bid_queue",
+      "vhost": "/auction",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 86400000,
+        "x-queue-type": "classic"
+      }
+    },
+    {
+      "name": "notification_queue",
+      "vhost": "/auction",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 86400000,
+        "x-queue-type": "classic"
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "auction_events",
+      "vhost": "/auction",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "auction_events",
+      "vhost": "/auction",
+      "destination": "bid_queue",
+      "destination_type": "queue",
+      "routing_key": "bid.*",
+      "arguments": {}
+    },
+    {
+      "source": "auction_events",
+      "vhost": "/auction",
+      "destination": "notification_queue",
+      "destination_type": "queue",
+      "routing_key": "bid_processed.*",
+      "arguments": {}
+    }
+  ]
+}

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auction Live Bidding</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #connection-status {
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .connected {
+            background-color: #ddffdd;
+            border-left: 6px solid #4CAF50;
+        }
+        .disconnected {
+            background-color: #ffdddd;
+            border-left: 6px solid #f44336;
+        }
+        #lot-info {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        #bid-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        #bid-input {
+            flex-grow: 1;
+            padding: 10px;
+            font-size: 16px;
+        }
+        #user-id {
+            width: 150px;
+            padding: 10px;
+        }
+        #bid-button {
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #bid-button:disabled {
+            background: #cccccc;
+        }
+        #messages {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 200px;
+            background: white;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .info {
+            background: #e7f3fe;
+            border-left: 6px solid #2196F3;
+        }
+        .error {
+            background: #ffdddd;
+            border-left: 6px solid #f44336;
+        }
+        .success {
+            background: #ddffdd;
+            border-left: 6px solid #4CAF50;
+        }
+        .current-price {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <h1>Online Auction</h1>
+    
+    <div id="connection-status" class="disconnected">
+        Connecting to server...
+    </div>
+    
+    <div id="lot-info">
+        <h2 id="lot-title">Loading...</h2>
+        <div>Current Price: <span id="current-price" class="current-price">-</span></div>
+        <div>Last Bidder: <span id="last-bidder">-</span></div>
+    </div>
+    
+    <div id="bid-form">
+        <input type="number" id="bid-input" placeholder="Your bid amount" min="0" step="1" disabled>
+        <input type="text" id="user-id" placeholder="Your User ID" disabled>
+        <button id="bid-button" disabled>Place Bid</button>
+    </div>
+    
+    <h3>Bidding History</h3>
+    <div id="messages"></div>
+
+    <script>
+        // Configuration
+        const lotId = 'lot_123'; // Should be dynamic in production
+        let currentPrice = 0;
+        let ws;
+        
+        // DOM Elements
+        const connectionStatus = document.getElementById('connection-status');
+        const lotTitle = document.getElementById('lot-title');
+        const currentPriceEl = document.getElementById('current-price');
+        const lastBidder = document.getElementById('last-bidder');
+        const bidInput = document.getElementById('bid-input');
+        const userIdInput = document.getElementById('user-id');
+        const bidButton = document.getElementById('bid-button');
+        const messagesContainer = document.getElementById('messages');
+
+        // WebSocket Connection
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/lots/${lotId}`;
+            
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                updateConnectionStatus(true, 'Connected to live updates');
+                loadLotData();
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.event === 'BidProcessed') {
+                        currentPrice = data.new_price;
+                        updateLotInfo(data.new_price, data.bidder);
+                        addMessage(`New bid: $${data.new_price.toFixed(2)} by ${data.bidder}`, 'success');
+                    }
+                } catch (e) {
+                    addMessage('Error processing update', 'error');
+                    console.error('WebSocket message error:', e);
+                }
+            };
+
+            ws.onerror = (error) => {
+                updateConnectionStatus(false, 'Connection error');
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onclose = () => {
+                updateConnectionStatus(false, 'Disconnected - reconnecting...');
+                setTimeout(connectWebSocket, 5000);
+            };
+        }
+
+        // Load lot data from API
+        async function loadLotData() {
+            try {
+                const response = await fetch(`/lots/${lotId}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const lot = await response.json();
+                
+                lotTitle.textContent = lot.title || 'Unknown Lot';
+                currentPrice = lot.current_price || 0;
+                updateLotInfo(currentPrice, lot.last_bidder);
+                
+                // Enable form
+                bidInput.disabled = false;
+                userIdInput.disabled = false;
+                updateBidButton();
+                
+                addMessage('Lot data loaded successfully', 'info');
+            } catch (error) {
+                addMessage(`Failed to load lot: ${error.message}`, 'error');
+                console.error('Lot load error:', error);
+            }
+        }
+
+        // Update lot info display
+        function updateLotInfo(price, bidder) {
+            currentPriceEl.textContent = `$${price.toFixed(2)}`;
+            lastBidder.textContent = bidder || '-';
+            updateBidButton();
+        }
+
+        // Validate and update bid button state
+        function updateBidButton() {
+            const bidAmount = parseFloat(bidInput.value);
+            bidButton.disabled = !(
+                bidAmount > currentPrice && 
+                userIdInput.value.trim().length > 0
+            );
+        }
+
+        // Submit new bid
+        async function placeBid() {
+            const amount = parseFloat(bidInput.value);
+            const userId = userIdInput.value.trim();
+            
+            if (!amount || !userId) return;
+
+            try {
+                bidButton.disabled = true;
+                addMessage(`Placing bid: $${amount.toFixed(2)}...`, 'info');
+
+                const response = await fetch(`/lots/${lotId}/bid`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        amount: amount
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.detail || 'Failed to place bid');
+                }
+
+                addMessage(`Bid placed successfully!`, 'success');
+                bidInput.value = '';
+            } catch (error) {
+                addMessage(`Bid failed: ${error.message}`, 'error');
+                console.error('Bid error:', error);
+            } finally {
+                updateBidButton();
+            }
+        }
+
+        // Update connection status UI
+        function updateConnectionStatus(connected, message) {
+            connectionStatus.textContent = message;
+            connectionStatus.className = connected ? 'connected' : 'disconnected';
+        }
+
+        // Add message to history
+        function addMessage(text, type) {
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${type}`;
+            messageEl.textContent = text;
+            messagesContainer.prepend(messageEl);
+        }
+
+        // Event listeners
+        bidInput.addEventListener('input', updateBidButton);
+        userIdInput.addEventListener('input', updateBidButton);
+        bidButton.addEventListener('click', placeBid);
+
+        // Initialize
+        connectWebSocket();
+    </script>
+</body>
+</html>
